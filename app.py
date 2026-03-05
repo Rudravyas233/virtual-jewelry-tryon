@@ -1,6 +1,6 @@
 """
-AI Virtual Jewelry Try-On
-Production version optimized for Railway deployment
+app.py — AI Virtual Jewelry Try-On
+Stable production version
 """
 
 import streamlit as st
@@ -8,27 +8,24 @@ import cv2
 import numpy as np
 from PIL import Image
 import os
-
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-from av import VideoFrame
+import time
 
 from face_tryon import FaceTryOn
 from hand_tryon import HandTryOn
 
 
-# ---------------------------------------------------
-# Page setup
-# ---------------------------------------------------
+# -----------------------------------------------------------
+# Page Config
+# -----------------------------------------------------------
 
 st.set_page_config(
     page_title="AI Virtual Jewelry Try-On",
-    layout="wide"
+    layout="wide",
 )
 
-
-# ---------------------------------------------------
-# Load detectors once
-# ---------------------------------------------------
+# -----------------------------------------------------------
+# Cache detectors
+# -----------------------------------------------------------
 
 @st.cache_resource
 def load_detectors():
@@ -36,10 +33,9 @@ def load_detectors():
 
 face_det, hand_det = load_detectors()
 
-
-# ---------------------------------------------------
+# -----------------------------------------------------------
 # Constants
-# ---------------------------------------------------
+# -----------------------------------------------------------
 
 FACE_TYPES = {"Necklaces", "Earrings"}
 
@@ -50,46 +46,38 @@ CATEGORY_MAP = {
     "Bracelets": ("bracelet", "jewelry/bracelets"),
 }
 
-FINGERS = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
+FINGER_OPTS = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
 
 
-# ---------------------------------------------------
-# Helpers
-# ---------------------------------------------------
+# -----------------------------------------------------------
+# Helper Functions
+# -----------------------------------------------------------
 
 def list_jewelry(folder):
 
     os.makedirs(folder, exist_ok=True)
 
-    return sorted([
+    return sorted(
         f for f in os.listdir(folder)
         if f.lower().endswith((".png", ".webp"))
-    ])
+    )
 
 
-def load_png(path):
+def load_img(path):
 
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
 
-    if img is not None and img.shape[2] == 3:
+    if img is not None and img.ndim == 3 and img.shape[2] == 3:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
 
     return img
 
 
-def run_detector(
-        frame,
-        jtype,
-        is_face,
-        jewelry_img,
-        v_adj,
-        finger,
-        ear_adj,
-        ring_scale,
-        bracelet_scale):
+def run_detector(frame, jtype, is_face, jewelry_img,
+                 v_adj, finger, ear_adj,
+                 ring_scale, bracelet_scale):
 
     if is_face:
-
         return face_det.process(
             frame,
             jewelry_img,
@@ -108,65 +96,20 @@ def run_detector(
     )
 
 
-# ---------------------------------------------------
-# WebRTC Video Processor
-# ---------------------------------------------------
-
-class JewelryProcessor(VideoProcessorBase):
-
-    def __init__(self):
-
-        self.jtype = None
-        self.is_face = None
-        self.jewelry_img = None
-        self.v_adj = 40
-        self.finger = "Ring"
-        self.ear_adj = 0
-        self.ring_scale = 1.0
-        self.bracelet_scale = 1.0
-
-    def recv(self, frame):
-
-        img = frame.to_ndarray(format="bgr24")
-
-        # mirror camera
-        img = cv2.flip(img, 1)
-
-        # slight smoothing
-        img = cv2.GaussianBlur(img, (3,3), 0)
-
-        out = run_detector(
-            img,
-            self.jtype,
-            self.is_face,
-            self.jewelry_img,
-            self.v_adj,
-            self.finger,
-            self.ear_adj,
-            self.ring_scale,
-            self.bracelet_scale
-        )
-
-        return VideoFrame.from_ndarray(out, format="bgr24")
-
-
-# ---------------------------------------------------
+# -----------------------------------------------------------
 # Main UI
-# ---------------------------------------------------
+# -----------------------------------------------------------
 
 def main():
 
-    st.title("✨ AI Virtual Jewelry Try-On")
+    st.sidebar.title("💎 Virtual Jewelry Try-On")
 
     mode = st.sidebar.selectbox(
         "Mode",
         ["Upload Photo", "Live Webcam"]
     )
 
-
-    # ---------------------------------------------------
-    # Jewelry selection
-    # ---------------------------------------------------
+    st.sidebar.markdown("---")
 
     category = st.sidebar.selectbox(
         "Category",
@@ -183,163 +126,202 @@ def main():
 
     if items:
 
-        item = st.sidebar.selectbox(
+        choice = st.sidebar.selectbox(
             "Select Jewelry",
             items
         )
 
-        path = os.path.join(folder, item)
+        path = os.path.join(folder, choice)
 
-        selected_img = load_png(path)
+        selected_img = load_img(path)
 
-        st.sidebar.image(path, width=120)
+        st.sidebar.image(
+            Image.open(path).convert("RGBA"),
+            width=140
+        )
 
     else:
 
-        st.sidebar.warning("Add PNG jewelry images")
+        st.sidebar.warning(
+            f"No PNG files found in `{folder}`"
+        )
 
-
-    # ---------------------------------------------------
+    # -------------------------------------------------------
     # Controls
-    # ---------------------------------------------------
+    # -------------------------------------------------------
+
+    st.sidebar.markdown("---")
+
+    st.sidebar.subheader("Fine Adjust")
 
     v_adj = 40
     ear_adj = 0
-    finger = "Ring"
     ring_scale = 1.0
     bracelet_scale = 1.0
+    selected_finger = "Ring"
 
-
-    if category == "Necklaces":
+    if is_face and category == "Necklaces":
 
         v_adj = st.sidebar.slider(
             "Necklace Height",
-            -50,150,40
+            -50, 150, 40
         )
 
-
-    if category == "Earrings":
+    if is_face and category == "Earrings":
 
         ear_adj = st.sidebar.slider(
-            "Earring Position",
-            -80,80,0
+            "Earring Offset",
+            -80, 80, 0
         )
-
 
     if category == "Rings":
 
-        finger = st.sidebar.radio(
+        selected_finger = st.sidebar.radio(
             "Finger",
-            FINGERS,
+            FINGER_OPTS,
             index=3
         )
 
         ring_scale = st.sidebar.slider(
             "Ring Size",
-            0.5,2.0,1.0
+            0.5, 2.0, 1.0
         )
-
 
     if category == "Bracelets":
 
         bracelet_scale = st.sidebar.slider(
             "Bracelet Size",
-            0.5,2.0,1.0
+            0.5, 2.0, 1.0
         )
 
+    # -------------------------------------------------------
+    # Main Layout
+    # -------------------------------------------------------
 
-    # ---------------------------------------------------
+    st.title("✨ AI Virtual Jewelry Try-On")
+
+    col_view, col_info = st.columns([3, 1])
+
+    with col_info:
+
+        st.markdown(
+            """
+**Tips for best results**
+
+• Good lighting  
+• Jewelry PNG with transparent background  
+• Keep hand steady  
+• Webcam works best
+"""
+        )
+
+    # -------------------------------------------------------
     # Upload Mode
-    # ---------------------------------------------------
+    # -------------------------------------------------------
 
     if mode == "Upload Photo":
 
-        file = st.file_uploader(
-            "Upload image",
-            type=["jpg","jpeg","png"]
+        up = st.file_uploader(
+            "Upload Image",
+            type=["jpg", "jpeg", "png"]
         )
 
-        if file and selected_img is not None:
+        if up and selected_img is not None:
 
-            img = Image.open(file).convert("RGB")
+            pil = Image.open(up).convert("RGB")
 
-            frame = cv2.cvtColor(
-                np.array(img),
+            bgr = cv2.cvtColor(
+                np.array(pil),
                 cv2.COLOR_RGB2BGR
             )
 
-            result = run_detector(
-                frame,
-                jtype,
-                is_face,
-                selected_img,
-                v_adj,
-                finger,
-                ear_adj,
-                ring_scale,
-                bracelet_scale
-            )
+            with st.spinner("Processing..."):
 
-            st.image(
-                cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
-            )
+                out = run_detector(
+                    bgr.copy(),
+                    jtype,
+                    is_face,
+                    selected_img,
+                    v_adj,
+                    selected_finger,
+                    ear_adj,
+                    ring_scale,
+                    bracelet_scale
+                )
 
+            with col_view:
 
-    # ---------------------------------------------------
+                st.image(
+                    cv2.cvtColor(out, cv2.COLOR_BGR2RGB),
+                    use_column_width=True
+                )
+
+            if st.button("Save Image"):
+
+                fname = f"tryon_{int(time.time())}.png"
+
+                cv2.imwrite(fname, out)
+
+                st.success(f"Saved: {fname}")
+
+    # -------------------------------------------------------
     # Webcam Mode
-    # ---------------------------------------------------
+    # -------------------------------------------------------
 
     else:
 
-        st.markdown("### Live Virtual Mirror")
+        st.subheader("Live Virtual Mirror")
 
-        if selected_img is None:
+        run = st.checkbox("Start Camera")
+
+        frame_placeholder = st.empty()
+
+        if run and selected_img is not None:
+
+            cap = cv2.VideoCapture(0)
+
+            # Force HD
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+            while run:
+
+                ret, frame = cap.read()
+
+                if not ret:
+                    st.error("Camera error")
+                    break
+
+                frame = cv2.flip(frame, 1)
+
+                out = run_detector(
+                    frame,
+                    jtype,
+                    is_face,
+                    selected_img,
+                    v_adj,
+                    selected_finger,
+                    ear_adj,
+                    ring_scale,
+                    bracelet_scale
+                )
+
+                frame_placeholder.image(
+                    cv2.cvtColor(out, cv2.COLOR_BGR2RGB),
+                    channels="RGB",
+                    use_column_width=True
+                )
+
+            cap.release()
+
+        elif run and selected_img is None:
 
             st.error("Select jewelry first")
-            return
 
 
-        rtc_config = RTCConfiguration({
-            "iceServers": [
-                {"urls": ["stun:stun.l.google.com:19302"]}
-            ]
-        })
-
-
-        ctx = webrtc_streamer(
-
-            key="jewelry",
-
-            video_processor_factory=JewelryProcessor,
-
-            rtc_configuration=rtc_config,
-
-            media_stream_constraints={
-                "video": {
-                    "width": {"ideal": 1280},
-                    "height": {"ideal": 720},
-                    "frameRate": {"ideal": 30},
-                },
-                "audio": False
-            },
-
-            async_processing=True
-        )
-
-
-        if ctx.video_processor:
-
-            ctx.video_processor.jtype = jtype
-            ctx.video_processor.is_face = is_face
-            ctx.video_processor.jewelry_img = selected_img
-            ctx.video_processor.v_adj = v_adj
-            ctx.video_processor.finger = finger
-            ctx.video_processor.ear_adj = ear_adj
-            ctx.video_processor.ring_scale = ring_scale
-            ctx.video_processor.bracelet_scale = bracelet_scale
-
-
-# ---------------------------------------------------
+# -----------------------------------------------------------
+# Run
+# -----------------------------------------------------------
 
 if __name__ == "__main__":
     main()
