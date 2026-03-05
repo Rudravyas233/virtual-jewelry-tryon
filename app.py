@@ -1,5 +1,5 @@
 """
-app.py — AI Virtual Boutique (Production + WebRTC Webcam)
+app.py — AI Virtual Boutique (Production + Smooth WebRTC)
 """
 
 import streamlit as st
@@ -10,35 +10,44 @@ import os
 import time
 
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+from av import VideoFrame
 
 from face_tryon import FaceTryOn
 from hand_tryon import HandTryOn
 
 
-# ─── Page config ───────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
+# Page Config
+# ─────────────────────────────────────────────────────
+
 st.set_page_config(
     page_title="AI Virtual Jewelry Try-On",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ─── Styling ───────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────
+# Styling
+# ─────────────────────────────────────────────────────
+
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@300;400;500&display=swap');
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-.main { background: #0a0c0f; color: #f0f0f0; }
-section[data-testid="stSidebar"] {
-    background: #111318; border-right: 1px solid #2a2d36;
+html, body, [class*="css"] {
+    font-family: Inter, sans-serif;
 }
-h1 { font-family: 'Playfair Display', serif;
-     background: linear-gradient(90deg, #D4AF37, #F8E77C, #D4AF37);
-     -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.main {
+    background: #0a0c0f;
+    color: #f0f0f0;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
-# ─── Load detectors ────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
+# Load detectors once
+# ─────────────────────────────────────────────────────
+
 @st.cache_resource
 def get_detectors():
     return FaceTryOn(), HandTryOn()
@@ -46,27 +55,37 @@ def get_detectors():
 face_det, hand_det = get_detectors()
 
 
-# ─── Constants ─────────────────────────────────────────────────────────────────
-FACE_TYPES   = {"Necklaces", "Earrings"}
+# ─────────────────────────────────────────────────────
+# Constants
+# ─────────────────────────────────────────────────────
+
+FACE_TYPES = {"Necklaces", "Earrings"}
 
 CATEGORY_MAP = {
-    "Necklaces": ("necklace",  "jewelry/necklaces"),
-    "Earrings":  ("earrings",  "jewelry/earrings"),
-    "Rings":     ("ring",      "jewelry/rings"),
-    "Bracelets": ("bracelet",  "jewelry/bracelets"),
+    "Necklaces": ("necklace", "jewelry/necklaces"),
+    "Earrings": ("earrings", "jewelry/earrings"),
+    "Rings": ("ring", "jewelry/rings"),
+    "Bracelets": ("bracelet", "jewelry/bracelets"),
 }
 
-FINGER_OPTS  = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
+FINGER_OPTS = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
 
 
-# ─── Utilities ─────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────
+
 def list_jewelry(folder):
     os.makedirs(folder, exist_ok=True)
-    return sorted(f for f in os.listdir(folder)
-                  if f.lower().endswith((".png", ".webp")))
+
+    return sorted(
+        f for f in os.listdir(folder)
+        if f.lower().endswith((".png", ".webp"))
+    )
 
 
 def load_img(path):
+
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
 
     if img is not None and img.ndim == 3 and img.shape[2] == 3:
@@ -75,10 +94,14 @@ def load_img(path):
     return img
 
 
-def run_detector(frame, jtype, is_face, jewelry_img, v_adj, finger,
-                 ear_adj=0, ring_scale=1.0, bracelet_scale=1.0):
+def run_detector(frame, jtype, is_face, jewelry_img,
+                 v_adj, finger,
+                 ear_adj=0,
+                 ring_scale=1.0,
+                 bracelet_scale=1.0):
 
     if is_face:
+
         return face_det.process(
             frame,
             jewelry_img,
@@ -97,10 +120,14 @@ def run_detector(frame, jtype, is_face, jewelry_img, v_adj, finger,
     )
 
 
-# ─── WebRTC Video Processor ────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
+# WebRTC Video Processor
+# ─────────────────────────────────────────────────────
+
 class JewelryVideoProcessor(VideoProcessorBase):
 
     def __init__(self):
+
         self.jtype = None
         self.is_face = None
         self.jewelry_img = None
@@ -113,6 +140,7 @@ class JewelryVideoProcessor(VideoProcessorBase):
     def recv(self, frame):
 
         img = frame.to_ndarray(format="bgr24")
+
         img = cv2.flip(img, 1)
 
         out = run_detector(
@@ -127,13 +155,15 @@ class JewelryVideoProcessor(VideoProcessorBase):
             self.bracelet_scale
         )
 
-        return out
+        return VideoFrame.from_ndarray(out, format="bgr24")
 
 
-# ─── Main ──────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
+# Main App
+# ─────────────────────────────────────────────────────
+
 def main():
 
-    # ── Sidebar ─────────────────────────────────────────────────────────────────
     st.sidebar.title("✦ Virtual Boutique")
 
     mode = st.sidebar.selectbox(
@@ -154,7 +184,11 @@ def main():
     selected_img = None
 
     if items:
-        choice = st.sidebar.selectbox("Select Item", items)
+
+        choice = st.sidebar.selectbox(
+            "Select Item",
+            items
+        )
 
         path = os.path.join(folder, choice)
 
@@ -167,12 +201,18 @@ def main():
             )
         except:
             pass
+
     else:
+
         st.sidebar.warning(
-            f"No PNG files in `{folder}`"
+            f"No PNG files found in `{folder}`"
         )
 
-    # ── Controls ────────────────────────────────────────────────────────────────
+
+    # ─────────────────────────────────
+    # Fine Controls
+    # ─────────────────────────────────
+
     v_adj = 40
     selected_finger = "Ring"
     ear_adj = 0
@@ -180,12 +220,21 @@ def main():
     bracelet_scale = 1.0
 
     if is_face and category == "Necklaces":
-        v_adj = st.sidebar.slider("Necklace Height", -50, 150, 40)
+
+        v_adj = st.sidebar.slider(
+            "Necklace Height",
+            -50, 150, 40
+        )
 
     if is_face and category == "Earrings":
-        ear_adj = st.sidebar.slider("Earring Position", -80, 80, 0)
+
+        ear_adj = st.sidebar.slider(
+            "Earring Position",
+            -80, 80, 0
+        )
 
     if category == "Rings":
+
         selected_finger = st.sidebar.radio(
             "Finger",
             FINGER_OPTS,
@@ -198,15 +247,24 @@ def main():
         )
 
     if category == "Bracelets":
+
         bracelet_scale = st.sidebar.slider(
             "Bracelet Size",
             0.5, 2.0, 1.0, step=0.05
         )
 
-    # ── Title ───────────────────────────────────────────────────────────────────
+
+    # ─────────────────────────────────
+    # Title
+    # ─────────────────────────────────
+
     st.title("✨ AI Virtual Jewelry Try-On")
 
-    # ── Upload Mode ─────────────────────────────────────────────────────────────
+
+    # ─────────────────────────────────
+    # Upload Mode
+    # ─────────────────────────────────
+
     if "Upload" in mode:
 
         up = st.file_uploader(
@@ -218,7 +276,10 @@ def main():
 
             pil = Image.open(up).convert("RGB")
 
-            bgr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+            bgr = cv2.cvtColor(
+                np.array(pil),
+                cv2.COLOR_RGB2BGR
+            )
 
             with st.spinner("Rendering..."):
 
@@ -239,24 +300,40 @@ def main():
                 use_container_width=True
             )
 
-    # ── Webcam Mode ─────────────────────────────────────────────────────────────
+
+    # ─────────────────────────────────
+    # Webcam Mode
+    # ─────────────────────────────────
+
     else:
 
         st.markdown("### 📽️ Live Virtual Mirror")
 
         if selected_img is None:
+
             st.error("Select jewelry first")
             return
 
-        RTC_CONFIGURATION = RTCConfiguration(
-            {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-        )
+        RTC_CONFIGURATION = RTCConfiguration({
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]}
+            ]
+        })
 
         ctx = webrtc_streamer(
+
             key="jewelry-tryon",
+
             video_processor_factory=JewelryVideoProcessor,
+
             rtc_configuration=RTC_CONFIGURATION,
-            media_stream_constraints={"video": True, "audio": False},
+
+            media_stream_constraints={
+                "video": True,
+                "audio": False
+            },
+
+            async_processing=True
         )
 
         if ctx.video_processor:
@@ -270,6 +347,8 @@ def main():
             ctx.video_processor.ring_scale = ring_scale
             ctx.video_processor.bracelet_scale = bracelet_scale
 
+
+# ─────────────────────────────────
 
 if __name__ == "__main__":
     main()
