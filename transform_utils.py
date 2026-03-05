@@ -194,7 +194,101 @@ def perspective_warp(img, dst_quad):
 
         return None
 
+# ------------------------------------------------------------
+# Hand Occlusion Mask
+# ------------------------------------------------------------
 
+HAND_HULL_INDICES = [
+    0, 1, 2,
+    5, 9, 13, 17,
+    18, 19, 20,
+    4, 3,
+    8, 12, 16
+]
+
+
+def hand_occlusion_mask(frame_shape, slm, w, h, dilate_px=6):
+
+    mask = np.zeros(frame_shape[:2], dtype=np.uint8)
+
+    pts = []
+
+    for idx in HAND_HULL_INDICES:
+        lm = slm[idx]
+        pts.append([int(lm.x * w), int(lm.y * h)])
+
+    pts = np.array(pts, dtype=np.int32)
+
+    hull = cv2.convexHull(pts)
+
+    cv2.fillConvexPoly(mask, hull, 255)
+
+    if dilate_px > 0:
+
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (dilate_px * 2 + 1, dilate_px * 2 + 1)
+        )
+
+        mask = cv2.dilate(mask, kernel, iterations=1)
+
+    return mask
+
+
+# ------------------------------------------------------------
+# Apply Occlusion
+# ------------------------------------------------------------
+
+def apply_occlusion(
+    frame_with_jewelry,
+    original_frame,
+    hand_mask,
+    finger_indices,
+    slm,
+    w,
+    h,
+    occlusion_strength=0.4,
+):
+
+    if occlusion_strength <= 0:
+        return frame_with_jewelry
+
+    finger_mask = np.zeros(frame_with_jewelry.shape[:2], dtype=np.uint8)
+
+    pts = []
+
+    for idx in finger_indices:
+        lm = slm[idx]
+        pts.append([int(lm.x * w), int(lm.y * h)])
+
+    if len(pts) < 3:
+        return frame_with_jewelry
+
+    pts = np.array(pts, dtype=np.int32)
+
+    hull = cv2.convexHull(pts)
+
+    cv2.fillConvexPoly(finger_mask, hull, 255)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+
+    eroded = cv2.erode(finger_mask, kernel, iterations=2)
+
+    edge_mask = cv2.subtract(finger_mask, eroded)
+
+    occ_mask = cv2.bitwise_and(hand_mask, edge_mask)
+
+    occ_mask = occ_mask[:, :, np.newaxis].astype(np.float32) / 255.0
+
+    result = frame_with_jewelry.astype(np.float32)
+
+    orig = original_frame.astype(np.float32)
+
+    result = result * (1 - occ_mask * occlusion_strength) + orig * (
+        occ_mask * occlusion_strength
+    )
+
+    return result.astype(np.uint8)
 # ───────────────────────── Smoothing ─────────────────────────
 
 class ParamSmoother:
