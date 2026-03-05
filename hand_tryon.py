@@ -218,8 +218,8 @@ class HandTryOn:
         depth_fac = max(0.60, min(1.50, 1.0 - depth_z * 5.5))
         ring_w_raw = max(finger_w_px * depth_fac * scale_mul, 8.0)
 
-        # ── Ring centre: 30% along MCP→PIP (proximal phalanx midpoint) ─────
-        t       = 0.30
+        # ── Ring centre: 45% along MCP→PIP (slightly up the finger) ──────────
+        t       = 0.45
         cx_raw  = float(s_mcp[0] + t * seg_vec[0])
         cy_raw  = float(s_mcp[1] + t * seg_vec[1])
 
@@ -343,8 +343,17 @@ class HandTryOn:
         # ── Wrist-plane perspective quad ────────────────────────────────────
         # Uses index MCP, pinky MCP, and wrist to define the wrist plane,
         # producing realistic foreshortening when wrist tilts toward camera
+        # ── Wrist anchor: shift down the forearm ────────────────────────────
+        # Only move s_wrist — s_idx and s_pink stay untouched so width/angle
+        # stay correct. This simply lowers the bracelet center.
+        knuckle_mid  = (s_idx + s_pink) / 2.0
+        fw_vec       = s_wrist - knuckle_mid          # knuckles → wrist
+        fw_unit      = fw_vec / (np.linalg.norm(fw_vec) + 1e-9)
+        shift_px     = np.linalg.norm(fw_vec) * 0.30  # 30% of knuckle→wrist length
+        s_wrist_low  = s_wrist + fw_unit * shift_px   # push further toward forearm
+
         bh   = int(bw * proc_img.shape[0] / max(proc_img.shape[1], 1))
-        quad = build_wrist_perspective_quad(s_idx, s_pink, s_wrist,
+        quad = build_wrist_perspective_quad(s_idx, s_pink, s_wrist_low,
                                             bw, bh, depth_z=depth_z)
 
         # Save original frame for occlusion
